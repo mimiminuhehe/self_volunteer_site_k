@@ -16,8 +16,8 @@ function getClientIP(req) {
     return req.headers['x-forwarded-for'] || req.socket.remoteAddress;
 }
 
-// 1. 우회 요청 처리 API (경로 꼬임 및 차단 완전 해결 버전)
-app.get('/bypass', (req, res, next) => {
+// 1. ⭐ 404 에러를 방지하기 위해, 모든 하위 경로(/*)의 요청을 다 받아주는 프록시 설정
+app.use('/bypass', (req, res, next) => {
     const encodedUrl = req.query.url;
     const ip = getClientIP(req);
 
@@ -28,7 +28,6 @@ app.get('/bypass', (req, res, next) => {
     if (!encodedUrl) return res.status(400).send('우회할 URL이 없습니다.');
 
     try {
-        // 암호화된 외계어 주소를 원래 주소로 복원
         const targetUrl = Buffer.from(encodedUrl, 'base64').toString('utf-8');
         const urlObj = new URL(targetUrl);
 
@@ -36,19 +35,22 @@ app.get('/bypass', (req, res, next) => {
             target: urlObj.origin,
             changeOrigin: true,
             followRedirects: true,
-            secure: false, // HTTPS 인증서 오류 무시 및 강제 통과
-            // 💡 핵심 수정: 렌더 서버가 봇으로 의심받지 않도록 일반 크롬 브라우저인 것처럼 위장합니다.
+            secure: false,
+            // 하위 파일(JS, CSS 등)을 요청할 때 타겟 사이트의 진짜 주소 경로를 덧붙여서 보냅니다.
+            pathRewrite: (path, req) => {
+                return urlObj.pathname + urlObj.search;
+            },
             headers: {
                 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-                'Accept-Language': 'ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7'
+                'Accept-Language': 'ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7',
+                'Origin': urlObj.origin,
+                'Referer': urlObj.origin
             },
             on: {
                 proxyRes: (proxyRes, req, res) => {
-                    // 브라우저의 CORS 제한 완벽히 박살내기
                     res.setHeader('Access-Control-Allow-Origin', '*');
                     res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
                     res.setHeader('Access-Control-Allow-Headers', '*');
-                    // 프레임 및 보안 제한 헤더 무력화
                     delete proxyRes.headers['x-frame-options'];
                     delete proxyRes.headers['content-security-policy'];
                 }
@@ -132,7 +134,7 @@ app.get('/', (req, res) => {
                     document.getElementById('box').innerHTML = \`
                         <h1>비밀 우회 검색창</h1>
                         <p>접속할 주소를 입력하세요.</p>
-                        <input type="text" id="targetUrl" placeholder="https://example.com" autofocus>
+                        <input type="text" id="targetUrl" placeholder="https://pokerogue.net" autofocus>
                         <button onclick="goToBypass()">우회 접속하기</button>
                     \`;
                     document.getElementById('targetUrl').addEventListener('keypress', function(e) {
@@ -205,5 +207,5 @@ app.post('/auth-check', (req, res) => {
 });
 
 app.listen(PORT, () => {
-    console.log(`Bypass Pro Final Server running on port ${PORT}`);
+    console.log(`Bypass Pro Path-Fixed Server running on port ${PORT}`);
 });
