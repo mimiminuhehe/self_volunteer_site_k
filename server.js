@@ -16,7 +16,7 @@ function getClientIP(req) {
     return req.headers['x-forwarded-for'] || req.socket.remoteAddress;
 }
 
-// 1. [핵심 수정] 외계어로 인코딩된 주소를 받아서 우회 처리하는 라우트
+// 1. ⭐ 포켓로그의 CORS 차단벽을 박살내는 프록시 엔진
 app.get('/bypass', (req, res, next) => {
     const encodedUrl = req.query.url;
     const ip = getClientIP(req);
@@ -28,20 +28,25 @@ app.get('/bypass', (req, res, next) => {
     if (!encodedUrl) return res.status(400).send('우회할 URL이 없습니다.');
 
     try {
-        // 암호화된 외계어 주소를 원래 주소(https://...)로 복원(디코딩)합니다.
         const targetUrl = Buffer.from(encodedUrl, 'base64').toString('utf-8');
-        
-        if (!targetUrl.startsWith('http://') && !targetUrl.startsWith('https://')) {
-            return res.status(400).send('올바른 URL 구조가 아닙니다.');
-        }
+        const urlObj = new URL(targetUrl);
 
         createProxyMiddleware({
-            target: targetUrl,
+            target: urlObj.origin,
             changeOrigin: true,
             followRedirects: true,
-            pathRewrite: (path, req) => {
-                return ''; // 타겟 서버로 갈 때 경로 초기화
-            },
+            pathRewrite: () => urlObj.pathname + urlObj.search,
+            // 💡 핵심: 게임 데이터가 들어올 때 브라우저의 모든 보안 경고(CORS)를 강제로 무력화합니다.
+            on: {
+                proxyRes: (proxyRes, req, res) => {
+                    res.setHeader('Access-Control-Allow-Origin', '*');
+                    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+                    res.setHeader('Access-Control-Allow-Headers', '*');
+                    // 포켓로그의 오리진 차단 헤더 삭제
+                    delete proxyRes.headers['x-frame-options'];
+                    delete proxyRes.headers['content-security-policy'];
+                }
+            }
         })(req, res, next);
 
     } catch (e) {
@@ -49,7 +54,7 @@ app.get('/bypass', (req, res, next) => {
     }
 });
 
-// 2. 메인 화면 및 검색창 (프론트엔드 내장)
+// 2. 메인 화면 및 검색창 (프론트엔드)
 app.get('/', (req, res) => {
     const ip = getClientIP(req);
     if (bannedIPs.has(ip)) {
@@ -121,7 +126,7 @@ app.get('/', (req, res) => {
                     document.getElementById('box').innerHTML = \`
                         <h1>비밀 우회 검색창</h1>
                         <p>접속할 주소를 입력하세요.</p>
-                        <input type="text" id="targetUrl" placeholder="https://example.com" autofocus>
+                        <input type="text" id="targetUrl" placeholder="https://pokerogue.net" autofocus>
                         <button onclick="goToBypass()">우회 접속하기</button>
                     \`;
                     document.getElementById('targetUrl').addEventListener('keypress', function(e) {
@@ -153,7 +158,6 @@ app.get('/', (req, res) => {
                     }
                 }
 
-                // ⭐ 주소를 외계어(Base64)로 변환해서 와이파이 방화벽을 뚫는 함수입니다.
                 function goToBypass() {
                     const userInput = document.getElementById('targetUrl').value.trim();
                     if (!userInput) return alert('주소를 입력해 주세요!');
@@ -161,7 +165,6 @@ app.get('/', (req, res) => {
                         return alert('주소 앞에 https:// 를 꼭 붙여주세요!');
                     }
                     
-                    // 주소를 안전하게 인코딩(외계어화) 처리합니다
                     const base64Url = btoa(encodeURIComponent(userInput).replace(/%([0-9A-F]{2})/g, function(match, p1) {
                         return String.fromCharCode('0x' + p1);
                     }));
