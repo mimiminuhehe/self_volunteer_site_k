@@ -6,7 +6,7 @@ const PORT = process.env.PORT || 8080;
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// [보안 설정 값]
+// [보안 설정 값] - 비밀번호 2개
 var CORRECT_PASSWORD = ["mw1357911?", "zxcvasdfqwer1234"]; 
 
 const failedAttempts = {}; 
@@ -16,7 +16,7 @@ function getClientIP(req) {
     return req.headers['x-forwarded-for'] || req.socket.remoteAddress;
 }
 
-// 1. ⭐ 가상 브라우저(iframe) 안에서 모든 하위 리소스 요청을 안전하게 우회 처리하는 핵심 엔진
+// 1. 가상 브라우저(iframe) 전용 안전 프록시 라우트
 app.use('/bypass', (req, res, next) => {
     let encodedUrl = req.query.url;
     const ip = getClientIP(req);
@@ -25,15 +25,17 @@ app.use('/bypass', (req, res, next) => {
         return res.status(403).send('<h1>[접근 차단] 비밀번호 5회 오류로 인해 이 사이트에 영구적으로 접속할 수 없습니다.</h1>');
     }
 
-    // 만약 이미지나 CSS 같은 하위 리소스가 들어올 때 url 파라미터가 없으면 Referer(이전 주소)를 추적하여 자동 복원합니다.
     if (!encodedUrl && req.headers.referer) {
-        const refererUrl = new URL(req.headers.referer);
-        encodedUrl = refererUrl.searchParams.get('url');
+        try {
+            const refererUrl = new URL(req.headers.referer);
+            encodedUrl = refererUrl.searchParams.get('url');
+        } catch(e) {}
     }
 
     if (!encodedUrl) return res.status(400).send('우회할 URL이 없습니다.');
 
     try {
+        // 암호화된 외계어 주소를 원래 주소로 복원
         const targetUrl = Buffer.from(encodedUrl, 'base64').toString('utf-8');
         const urlObj = new URL(targetUrl);
 
@@ -42,9 +44,9 @@ app.use('/bypass', (req, res, next) => {
             changeOrigin: true,
             followRedirects: true,
             secure: false,
-            // 💡 경로 왜곡 방지: 가상 브라우저 내부에서 하위 파일 요청 경로를 원래 타겟 주소와 똑같이 맵핑합니다.
-            pathRewrite: (path, req) => {
-                return req.originalUrl.replace('/bypass', '') || '/';
+            // 💡 문법 오류 방지: 복잡한 함수 대신 직관적인 경로 치환 플러그인 로직 적용
+            pathRewrite: {
+                '^/bypass': ''
             },
             headers: {
                 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
@@ -54,7 +56,6 @@ app.use('/bypass', (req, res, next) => {
             },
             on: {
                 proxyRes: (proxyRes, req, res) => {
-                    // 브라우저가 프레임(iframe) 차단을 못 하도록 차단 헤더들을 완전히 박살냅니다.
                     res.setHeader('Access-Control-Allow-Origin', '*');
                     res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
                     res.setHeader('Access-Control-Allow-Headers', '*');
@@ -70,7 +71,7 @@ app.use('/bypass', (req, res, next) => {
     }
 });
 
-// 2. 메인 화면 및 가상 브라우저 인터페이스
+// 2. 메인 화면 및 가상 브라우저 인터페이스 HTML
 app.get('/', (req, res) => {
     const ip = getClientIP(req);
     if (bannedIPs.has(ip)) {
@@ -91,7 +92,6 @@ app.get('/', (req, res) => {
                     margin: 0; padding: 0; overflow: hidden;
                     display: flex; flex-direction: column; height: 100vh;
                 }
-                /* 상단 검색 바 디자인 */
                 .navbar {
                     background: #1e1e1e; padding: 10px 20px;
                     display: flex; gap: 15px; align-items: center;
@@ -110,7 +110,6 @@ app.get('/', (req, res) => {
                 }
                 .navbar button:hover { background-color: #9965db; }
                 
-                /* 로그인 전 중앙 박스 */
                 .login-container {
                     text-align: center; width: 90%; max-width: 400px;
                     background: #1e1e1e; padding: 40px 30px; border-radius: 12px;
@@ -122,16 +121,13 @@ app.get('/', (req, res) => {
                 .login-container button { width: 100%; padding: 15px; }
                 .error-msg { color: #ff6b6b; margin-top: 15px; font-weight: bold; font-size: 14px; }
 
-                /* 가상 브라우저 화면 영역 */
                 #gameFrame {
                     width: 100%; flex: 1; border: none; background: white; display: none;
                 }
             </style>
         </head>
         <body>
-            <div id="mainView" style="display: flex; flex-direction: column; width: 100%; height: 100%;">
-                <!-- 컨텐츠가 스크립트에 의해 동적으로 주입됩니다 -->
-            </div>
+            <div id="mainView" style="display: flex; flex-direction: column; width: 100%; height: 100%;"></div>
 
             <script>
                 const mainView = document.getElementById('mainView');
@@ -197,7 +193,6 @@ app.get('/', (req, res) => {
                     }
                 }
 
-                // ⭐ 가상 브라우저(iframe) 안으로 안전하게 격리하여 와이파이 방화벽을 원천 차단하는 마법의 함수
                 function goToBypass() {
                     const userInput = document.getElementById('targetUrl').value.trim();
                     if (!userInput) return alert('주소를 입력해 주세요!');
@@ -211,7 +206,6 @@ app.get('/', (req, res) => {
 
                     const iframe = document.getElementById('gameFrame');
                     iframe.style.display = "block";
-                    // 메인 창 주소는 내 주소로 고정하고, iframe 내부만 우회 주소로 채웁니다.
                     iframe.src = window.location.origin + '/bypass?url=' + base64Url;
                 }
             </script>
@@ -219,24 +213,26 @@ app.get('/', (req, res) => {
         </html>
     `);
 });
+
+// 3. 질문하셨던 비밀번호 검증 및 서버 시작 뼈대 코드 (안전 결합 완료)
 app.post('/auth-check', (req, res) => {
     const { password } = req.body;
     const ip = getClientIP(req);
+
     if (bannedIPs.has(ip)) {
         return res.json({ success: false, banned: true });
     }
-    
+
     if (CORRECT_PASSWORD.includes(password)) {
         failedAttempts[ip] = 0;
         return res.json({ success: true });
     } else {
         failedAttempts[ip] = (failedAttempts[ip] || 0) + 1;
-        if (failedAttempts[ip] >= 5) {
-            bannedIPs.add(ip);
-            return res.json({ success: false, banned: true, attempts: failedAttempts[ip] });
-        }return res.json({ success: false, banned: false, attempts: failedAttempts[ip] });
+if (failedAttempts[ip] >= 5) {
+    bannedIPs.add(ip);
+    return res.json({ success: false, banned: true, attempts: failedAttempts[ip] });
+}return res.json({ success: false, banned: false, attempts: failedAttempts[ip] });
     }});
-
 app.listen(PORT, () => {
     console.log(Virtual-Browser Proxy Server running on port ${PORT});
 });
